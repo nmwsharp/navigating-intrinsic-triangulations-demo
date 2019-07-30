@@ -78,6 +78,11 @@ void flipDelaunayTriangulation() {
 
 void refineDelaunayTriangulation() {
 
+  if(mesh->hasBoundary()) {
+    polyscope::error("refinement only implemented for closed meshes, go bug Nick to finish");
+    return;
+  }
+
   // Manage optional parameters
   double sizeParam = useRefineSizeThresh ? refineToSize : std::numeric_limits<double>::infinity();
   size_t maxInsertions = useInsertionsMax ? insertionsMax : INVALID_IND;
