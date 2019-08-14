@@ -5,6 +5,7 @@ Demo code for "Navigating Intrinsic Triangulations". Sharp, Soliman, and Crane. 
 
 Our core signpost data structure is implemented in [geometry-central](http://geometry-central.net). This is a simple appliction which loads a mesh, computes an intrinsic triangulation, and visualizes its edges. Notice that the resulting `SignpostIntrinsicTriangulation` class can be used with all geometry routines in geometry-central.
 
+**Note:** This is not the version of the code which was used to generate the results in the paper; it has been simplified to make it easier to use. If you want to generate precise comparisons against the paper, please contact the authors.
 
 ### Building and running
 
