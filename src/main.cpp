@@ -27,7 +27,7 @@ polyscope::SurfaceMesh* psMesh;
 
 // Parameters
 float refineToSize = -1;
-float refineDegreeThresh = 29.9;
+float refineDegreeThresh = 25;
 bool useRefineSizeThresh = false;
 bool useInsertionsMax;
 int insertionsMax = -2;
