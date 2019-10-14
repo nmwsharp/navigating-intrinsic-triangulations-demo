@@ -99,7 +99,7 @@ void refineDelaunayTriangulation() {
   std::cout << "Refining triangulation to Delaunay with:   degreeThresh=" << refineDegreeThresh
             << " circumradiusThresh=" << refineToSize << " maxInsertions=" << maxInsertions << std::endl;
 
-  signpostTri->delaunyRefine(refineDegreeThresh, sizeParam, maxInsertions);
+  signpostTri->delaunayRefine(refineDegreeThresh, sizeParam, maxInsertions);
 
   if (!signpostTri->isDelaunay()) {
     polyscope::warning(
