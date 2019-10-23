@@ -166,7 +166,8 @@ void refineAroundVertices(std::string refineFilename, int refineRadius) {
       }
     }
   }
-
+  
+  signpostTri->refreshQuantities();
 
   updateTriagulationViz();
 }
