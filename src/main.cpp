@@ -110,7 +110,7 @@ void refineDelaunayTriangulation() {
   updateTriagulationViz();
 }
 
-void refineAroundVertices(std::string refineFilename, int refineRadius=1) {
+void refineAroundVertices(std::string refineFilename, int refineRadius) {
 
   // Parse the file with indices
   VertexData<int> refineLevel(signpostTri->mesh, 0);
@@ -135,7 +135,7 @@ void refineAroundVertices(std::string refineFilename, int refineRadius=1) {
       VertexData<int> nextRefineLevel = thisRefineLevel;
       for(Vertex v : signpostTri->mesh.vertices()) {
         for(Vertex vn : v.adjacentVertices()) {
-          nextRefineLevel[vn] = std::max(thisRefineLevel[vn], thisRefineLevel[v]);
+          nextRefineLevel[vn] = std::max(nextRefineLevel[vn], thisRefineLevel[v]);
         }
       }
       thisRefineLevel = nextRefineLevel;
