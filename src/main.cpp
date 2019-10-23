@@ -32,6 +32,7 @@ float refineDegreeThresh = 25;
 bool useRefineSizeThresh = false;
 bool useInsertionsMax;
 int insertionsMax = -2;
+int refineNeighSize = 1;
 
 // Mesh stats
 bool signpostIsDelaunay = true;
@@ -109,69 +110,63 @@ void refineDelaunayTriangulation() {
   updateTriagulationViz();
 }
 
-void refineAroundVertices(std::string refineFilename) {
+void refineAroundVertices(std::string refineFilename, int refineRadius=1) {
 
   // Parse the file with indices
-  VertexData<double> vertRefineRadius(signpostTri->mesh, std::numeric_limits<double>::infinity());
+  VertexData<int> refineLevel(signpostTri->mesh, 0);
+  int maxRefineRound = 0;
   {
     std::ifstream inFile(refineFilename);
     size_t vertInd;
-    double vertRadius;
-    while (inFile >> vertInd >> vertRadius) {
-      vertRefineRadius[vertInd] = vertRadius;
+    int level;
+    while (inFile >> vertInd >> level) {
+      refineLevel[vertInd] = level;
+      maxRefineRound = std::max(maxRefineRound, level);
     }
   }
   
-  // Manage optional parameters
-  double sizeParam = useRefineSizeThresh ? refineToSize : std::numeric_limits<double>::infinity();
-  size_t maxInsertions = useInsertionsMax ? insertionsMax : INVALID_IND;
 
-  // Build our custom refinement function
-  double angleThreshRad = refineDegreeThresh * M_PI / 180.;
-  double circumradiusEdgeRatioThresh = 1.0 / (2.0 * std::sin(angleThreshRad));
+  // Iteratively refine
+  for(int refineRound = 0; refineRound < maxRefineRound; refineRound++) {
 
-  // Build a function to test if a face violates the circumradius ratio condition
-  auto needsCircumcenterRefinement = [&](Face f) {
-    double c = signpostTri->circumradius(f);
-    double l = signpostTri->shortestEdge(f);
-
-    bool needsRefinementLength = c > sizeParam;
-
-    // Check custom sizes for all adjacent vertices
-    // LOOK HERE this is the only thing that's different from the standard delaunayRefine function
-    for (Vertex v : f.adjacentVertices()) {
-      if (c > vertRefineRadius[v]) {
-        needsRefinementLength = true;
+    // First, propagate radii
+    VertexData<int> thisRefineLevel = refineLevel;
+    for(int propRound = 0; propRound+1 < refineRadius; propRound++) {
+      VertexData<int> nextRefineLevel = thisRefineLevel;
+      for(Vertex v : signpostTri->mesh.vertices()) {
+        for(Vertex vn : v.adjacentVertices()) {
+          nextRefineLevel[vn] = std::max(thisRefineLevel[vn], thisRefineLevel[v]);
+        }
       }
+      thisRefineLevel = nextRefineLevel;
     }
 
-    // Explicit check allows us to skip degree one vertices (can't make those angles smaller!)
-    bool needsRefinementAngle = false;
-    for (Halfedge he : f.adjacentHalfedges()) {
-
-      double baseAngle = signpostTri->cornerAngle(he.corner());
-      if (baseAngle < angleThreshRad) {
-
-        // If it's already a degree one vertex, nothing we can do here
-        bool isDegreeOneVertex = he.next().next() == he.twin();
-        if (isDegreeOneVertex) {
-          continue;
+    // Refine each face if it is adjacent to a vertex with a greater refine level than the current round
+    EdgeData<char> edgeToFlip(signpostTri->mesh, false);
+    for(Face f : signpostTri->mesh.faces()) { // WARNING this loop inserts faces while iterating, which might not be supported
+        bool refineFace = false; 
+        for(Vertex vn : f.adjacentVertices()) {
+          if(thisRefineLevel[vn] > refineRound) {
+            refineFace = true;
+          }
         }
 
-        needsRefinementAngle = true;
-      }
+        if(refineFace) {
+          Vertex newV = signpostTri->insertBarycenter(f); 
+          for(Halfedge he : newV.outgoingHalfedges()) {
+            edgeToFlip[he.next().edge()] = true; 
+          }
+        }
     }
 
-    return needsRefinementAngle || needsRefinementLength;
-  };
-
-
-  signpostTri->delaunayRefine(needsCircumcenterRefinement, maxInsertions);
-
-  if (!signpostTri->isDelaunay()) {
-    polyscope::warning(
-        "Failed to make mesh Delaunay with flips & refinement. Bug Nick to finish porting implementation.");
+    // Flip all the necessary edges from the refinement step
+    for(Edge e  : signpostTri->mesh.edges()) { 
+      if(edgeToFlip[e]) {
+        signpostTri->flipEdgeIfPossible(e);
+      }
+    }
   }
+
 
   updateTriagulationViz();
 }
@@ -403,7 +398,8 @@ int main(int argc, char** argv) {
   args::ValueFlag<int> refineMaxInsertions(triangulation, "refineMaxInsertions", 
       "Maximum number of insertions during refinement. Use 0 for no max, or negative values to scale by number of vertices. Default: 10 * nVerts", 
       {"refineMaxInsertions"}, -10);
-  args::ValueFlag<std::string> refineAroundVerts(parser, "refineAroundVerts", "A text file where each line contains a vertex to refine around and circumradius to use, separated by a space.", {"refineAroundVerts"});
+  args::ValueFlag<std::string> refineAroundVerts(triangulation, "refineAroundVerts", "A text file where each line contains a vertex to refine around and circumradius to use, separated by a space.", {"refineAroundVerts"});
+  args::ValueFlag<int> refineNeighSize(triangulation, "refineNeighSize", "Radius in which to perform refinement around vertices. Default: 1", {"refineNeighSize"}, 1);
 
   args::Group output(parser, "ouput");
   args::Flag noGUI(output, "noGUI", "exit after processing and do not open the GUI", {"noGUI"});
@@ -492,7 +488,7 @@ int main(int argc, char** argv) {
   // Perform any operations requested
   if (flipDelaunay) flipDelaunayTriangulation();
   if (refineDelaunay) refineDelaunayTriangulation();
-  if (refineAroundVerts) refineAroundVertices(args::get(refineAroundVerts));
+  if (refineAroundVerts) refineAroundVertices(args::get(refineAroundVerts), args::get(refineNeighSize));
 
   // Generate any outputs
   if (intrinsicFaces) outputIntrinsicFaces();
