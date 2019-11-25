@@ -110,6 +110,74 @@ void refineDelaunayTriangulation() {
   updateTriagulationViz();
 }
 
+
+void refineDelaunayAroundVertices(std::string refineFilename) {
+
+  // Parse the file with indices
+  VertexData<double> vertRefineRadius(signpostTri->mesh, std::numeric_limits<double>::infinity());
+  {
+    std::ifstream inFile(refineFilename);
+    size_t vertInd;
+    double vertRadius;
+    while (inFile >> vertInd >> vertRadius) {
+      vertRefineRadius[vertInd] = vertRadius;
+    }
+  }
+
+  // Manage optional parameters
+  double sizeParam = useRefineSizeThresh ? refineToSize : std::numeric_limits<double>::infinity();
+  size_t maxInsertions = useInsertionsMax ? insertionsMax : INVALID_IND;
+
+  // Build our custom refinement function
+  double angleThreshRad = refineDegreeThresh * M_PI / 180.;
+  double circumradiusEdgeRatioThresh = 1.0 / (2.0 * std::sin(angleThreshRad));
+
+  // Build a function to test if a face violates the circumradius ratio condition
+  auto needsCircumcenterRefinement = [&](Face f) {
+    double c = signpostTri->circumradius(f);
+    double l = signpostTri->shortestEdge(f);
+
+    bool needsRefinementLength = c > sizeParam;
+
+    // Check custom sizes for all adjacent vertices
+    // LOOK HERE this is the only thing that's different from the standard delaunayRefine function
+    for (Vertex v : f.adjacentVertices()) {
+      if (c > vertRefineRadius[v]) {
+        needsRefinementLength = true;
+      }
+    }
+
+    // Explicit check allows us to skip degree one vertices (can't make those angles smaller!)
+    bool needsRefinementAngle = false;
+    for (Halfedge he : f.adjacentHalfedges()) {
+
+      double baseAngle = signpostTri->cornerAngle(he.corner());
+      if (baseAngle < angleThreshRad) {
+
+        // If it's already a degree one vertex, nothing we can do here
+        bool isDegreeOneVertex = he.next().next() == he.twin();
+        if (isDegreeOneVertex) {
+          continue;
+        }
+
+        needsRefinementAngle = true;
+      }
+    }
+
+    return needsRefinementAngle || needsRefinementLength;
+  };
+
+
+  signpostTri->delaunayRefine(needsCircumcenterRefinement, maxInsertions);
+
+  if (!signpostTri->isDelaunay()) {
+    polyscope::warning(
+        "Failed to make mesh Delaunay with flips & refinement. Bug Nick to finish porting implementation.");
+  }
+
+  updateTriagulationViz();
+}
+
 void refineAroundVertices(std::string refineFilename, int refineRadius) {
 
   // Parse the file with indices
@@ -399,8 +467,9 @@ int main(int argc, char** argv) {
   args::ValueFlag<int> refineMaxInsertions(triangulation, "refineMaxInsertions", 
       "Maximum number of insertions during refinement. Use 0 for no max, or negative values to scale by number of vertices. Default: 10 * nVerts", 
       {"refineMaxInsertions"}, -10);
-  args::ValueFlag<std::string> refineAroundVerts(triangulation, "refineAroundVerts", "A text file where each line contains a vertex to refine around and circumradius to use, separated by a space.", {"refineAroundVerts"});
+  args::ValueFlag<std::string> refineAroundVerts(triangulation, "refineAroundVerts", "A text file where each line contains a vertex to refine around and a number of refinements to perform, separated by a space.", {"refineAroundVerts"});
   args::ValueFlag<int> refineNeighSize(triangulation, "refineNeighSize", "Radius in which to perform refinement around vertices. Default: 1", {"refineNeighSize"}, 1);
+  args::ValueFlag<std::string> refineDelaunayAroundVerts(triangulation, "refineDelaunayAroundVerts", "A text file where each line contains a vertex to refine around and circumradius to use, separated by a space.", {"refineDelaunayAroundVerts"});
 
   args::Group output(parser, "ouput");
   args::Flag noGUI(output, "noGUI", "exit after processing and do not open the GUI", {"noGUI"});
@@ -490,6 +559,7 @@ int main(int argc, char** argv) {
   if (flipDelaunay) flipDelaunayTriangulation();
   if (refineDelaunay) refineDelaunayTriangulation();
   if (refineAroundVerts) refineAroundVertices(args::get(refineAroundVerts), args::get(refineNeighSize));
+  if (refineDelaunayAroundVerts) refineDelaunayAroundVertices(args::get(refineDelaunayAroundVerts));
 
   // Generate any outputs
   if (intrinsicFaces) outputIntrinsicFaces();
