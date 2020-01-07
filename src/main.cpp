@@ -46,6 +46,9 @@ void updateTriagulationViz() {
     return;
   }
 
+  // clear old
+  psMesh->removeAllQuantities();
+
   // Update stats
   signpostIsDelaunay = signpostTri->isDelaunay();
   signpostMinAngleDeg = signpostTri->minAngleDegrees();
@@ -61,6 +64,12 @@ void updateTriagulationViz() {
     for (SurfacePoint& p : traces[e]) {
       traces3D[i].push_back(p.interpolate(geometry->inputVertexPositions));
     }
+
+    // Register each individual trace
+    // auto graphQ = polyscope::getSurfaceMesh()->addSurfaceGraphQuantity("intrinsic edges " + std::to_string(i),
+    // std::vector<std::vector<Vector3>>{traces3D[i]});
+    // graphQ->setEnabled(true);
+
     i++;
   }
 
@@ -87,11 +96,6 @@ void flipDelaunayTriangulation() {
 }
 
 void refineDelaunayTriangulation() {
-
-  if (mesh->hasBoundary()) {
-    polyscope::error("refinement only implemented for closed meshes, go bug Nick to finish");
-    return;
-  }
 
   // Manage optional parameters
   double sizeParam = useRefineSizeThresh ? refineToSize : std::numeric_limits<double>::infinity();
@@ -192,17 +196,17 @@ void refineAroundVertices(std::string refineFilename, int refineRadius) {
       maxRefineRound = std::max(maxRefineRound, level);
     }
   }
-  
+
 
   // Iteratively refine
-  for(int refineRound = 0; refineRound < maxRefineRound; refineRound++) {
+  for (int refineRound = 0; refineRound < maxRefineRound; refineRound++) {
 
     // First, propagate radii
     VertexData<int> thisRefineLevel = refineLevel;
-    for(int propRound = 0; propRound+1 < refineRadius; propRound++) {
+    for (int propRound = 0; propRound + 1 < refineRadius; propRound++) {
       VertexData<int> nextRefineLevel = thisRefineLevel;
-      for(Vertex v : signpostTri->mesh.vertices()) {
-        for(Vertex vn : v.adjacentVertices()) {
+      for (Vertex v : signpostTri->mesh.vertices()) {
+        for (Vertex vn : v.adjacentVertices()) {
           nextRefineLevel[vn] = std::max(nextRefineLevel[vn], thisRefineLevel[v]);
         }
       }
@@ -211,30 +215,31 @@ void refineAroundVertices(std::string refineFilename, int refineRadius) {
 
     // Refine each face if it is adjacent to a vertex with a greater refine level than the current round
     EdgeData<char> edgeToFlip(signpostTri->mesh, false);
-    for(Face f : signpostTri->mesh.faces()) { // WARNING this loop inserts faces while iterating, which might not be supported
-        bool refineFace = false; 
-        for(Vertex vn : f.adjacentVertices()) {
-          if(thisRefineLevel[vn] > refineRound) {
-            refineFace = true;
-          }
+    for (Face f :
+         signpostTri->mesh.faces()) { // WARNING this loop inserts faces while iterating, which might not be supported
+      bool refineFace = false;
+      for (Vertex vn : f.adjacentVertices()) {
+        if (thisRefineLevel[vn] > refineRound) {
+          refineFace = true;
         }
+      }
 
-        if(refineFace) {
-          Vertex newV = signpostTri->insertBarycenter(f); 
-          for(Halfedge he : newV.outgoingHalfedges()) {
-            edgeToFlip[he.next().edge()] = true; 
-          }
+      if (refineFace) {
+        Vertex newV = signpostTri->insertBarycenter(f);
+        for (Halfedge he : newV.outgoingHalfedges()) {
+          edgeToFlip[he.next().edge()] = true;
         }
+      }
     }
 
     // Flip all the necessary edges from the refinement step
-    for(Edge e  : signpostTri->mesh.edges()) { 
-      if(edgeToFlip[e]) {
+    for (Edge e : signpostTri->mesh.edges()) {
+      if (edgeToFlip[e]) {
         signpostTri->flipEdgeIfPossible(e);
       }
     }
   }
-  
+
   signpostTri->refreshQuantities();
 
   updateTriagulationViz();
