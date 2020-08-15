@@ -1,4 +1,4 @@
-#include "geometrycentral/surface/halfedge_mesh.h"
+#include "geometrycentral/surface/manifold_surface_mesh.h"
 #include "geometrycentral/surface/meshio.h"
 #include "geometrycentral/surface/signpost_intrinsic_triangulation.h"
 #include "geometrycentral/surface/surface_centers.h"
@@ -17,7 +17,7 @@ using namespace geometrycentral;
 using namespace geometrycentral::surface;
 
 // == Geometry-central data
-std::unique_ptr<HalfedgeMesh> mesh;
+std::unique_ptr<ManifoldSurfaceMesh> mesh;
 std::unique_ptr<VertexPositionGeometry> geometry;
 
 std::unique_ptr<SignpostIntrinsicTriangulation> signpostTri;
@@ -69,7 +69,7 @@ void updateTriagulationViz() {
 }
 
 void resetTriangulation() {
-  signpostTri.reset(new SignpostIntrinsicTriangulation(*geometry));
+  signpostTri.reset(new SignpostIntrinsicTriangulation(*mesh, *geometry));
   updateTriagulationViz();
 }
 
@@ -376,7 +376,7 @@ int main(int argc, char** argv) {
   outputPrefix = args::get(outputPrefixArg);
 
   // Load mesh
-  std::tie(mesh, geometry) = loadMesh(args::get(inputFilename));
+  std::tie(mesh, geometry) = readManifoldSurfaceMesh(args::get(inputFilename));
 
   // Sale max insertions by number of vertices if needed
   if (insertionsMax < 0) {
@@ -414,7 +414,7 @@ int main(int argc, char** argv) {
     polyscope::getSurfaceMesh()->setFaceTangentBasisX(fBasisX);
 
     // Nice defaults
-    psMesh->edgeWidth = 1.0;
+    psMesh->setEdgeWidth(1.0);
   }
 
 
