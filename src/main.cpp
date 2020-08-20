@@ -88,8 +88,7 @@ void flipDelaunayTriangulation() {
 void refineDelaunayTriangulation() {
 
   if (mesh->hasBoundary()) {
-    polyscope::error("refinement only implemented for closed meshes, go bug Nick to finish");
-    return;
+    polyscope::error("Support for refining meshes with boundary is experimental; proceed with caution!");
   }
 
   // Manage optional parameters
