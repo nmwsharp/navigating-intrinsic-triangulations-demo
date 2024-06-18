@@ -1,9 +1,10 @@
+#include "geometrycentral/surface/common_subdivision.h"
 #include "geometrycentral/surface/manifold_surface_mesh.h"
 #include "geometrycentral/surface/meshio.h"
 #include "geometrycentral/surface/signpost_intrinsic_triangulation.h"
 #include "geometrycentral/surface/surface_centers.h"
-#include "geometrycentral/surface/vertex_position_geometry.h"
 
+#include "polyscope/curve_network.h"
 #include "polyscope/point_cloud.h"
 #include "polyscope/polyscope.h"
 #include "polyscope/surface_mesh.h"
@@ -24,7 +25,9 @@ std::unique_ptr<SignpostIntrinsicTriangulation> signpostTri;
 
 // Polyscope visualization handle, to quickly add data to the surface
 bool withGUI = true;
-polyscope::SurfaceMesh* psMesh;
+bool generateColoredTriangleViz = false;
+polyscope::SurfaceMesh* psMesh = nullptr;
+polyscope::SurfaceMesh* psMeshColoredTri = nullptr;
 
 // Parameters
 float refineToSize = -1;
@@ -51,7 +54,7 @@ void updateTriagulationViz() {
 
 
   // Get the edge traces
-  EdgeData<std::vector<SurfacePoint>> traces = signpostTri->traceEdges();
+  EdgeData<std::vector<SurfacePoint>> traces = signpostTri->traceAllIntrinsicEdgesAlongInput();
 
   // Convert to 3D positions
   std::vector<std::vector<Vector3>> traces3D(traces.size());
@@ -62,10 +65,64 @@ void updateTriagulationViz() {
     }
     i++;
   }
+  std::vector<Vector3> tracesPts;
+  std::vector<std::array<size_t, 2>> tracesEdgeInds;
+  for (std::vector<Vector3>& line : traces3D) {
+    if (line.size() < 2) continue;
+    tracesPts.push_back(line[0]);
+    for (size_t i = 0; i < line.size() - 1; i++) {
+      tracesPts.push_back(line[i + 1]);
+      tracesEdgeInds.push_back({tracesPts.size() - 2, tracesPts.size() - 1});
+    }
+  }
+
 
   // Register with polyscope
-  auto graphQ = polyscope::getSurfaceMesh()->addSurfaceGraphQuantity("intrinsic edges", traces3D);
-  graphQ->setEnabled(true);
+  auto psCurves = polyscope::registerCurveNetwork("intrinsic edges", tracesPts, tracesEdgeInds);
+  psCurves->setEnabled(true);
+
+  // == Manage the colored overlay triangle viz
+  if (psMeshColoredTri) {
+    polyscope::removeStructure(psMeshColoredTri);
+    psMeshColoredTri = nullptr;
+    psMesh->setEnabled(true);
+  }
+  if (generateColoredTriangleViz) {
+
+    bool success = false;
+    VertexData<Vector3> csPositions;
+    FaceData<double> niceColorValCs;
+    ManifoldSurfaceMesh* csMesh;
+    try {
+
+      CommonSubdivision& cs = signpostTri->getCommonSubdivision();
+      cs.constructMesh();
+      csMesh = cs.mesh.get();
+      csPositions = cs.interpolateAcrossA(geometry->vertexPositions);
+      FaceData<double> niceColorValInt = niceColors(cs.meshB);
+      niceColorValCs = FaceData<double>(*cs.mesh);
+      for (Face f : cs.mesh->faces()) {
+        niceColorValCs[f] = niceColorValInt[cs.sourceFaceB[f]];
+      }
+      success = true;
+    } catch (std::runtime_error& e) {
+      polyscope::warning("Extracing common subdivision numerically did not yield perfect connectvity. Try using "
+                         "Integer Coordinates instead!");
+      generateColoredTriangleViz = false;
+    }
+
+    if (success) {
+      psMeshColoredTri = polyscope::registerSurfaceMesh("intrinsic triangle viz", csPositions,
+                                                        csMesh->getFaceVertexList(), polyscopePermutations(*csMesh));
+      auto* q = psMeshColoredTri->addFaceScalarQuantity("color val", niceColorValCs);
+      q->setColorMap("turbo");
+      q->setEnabled(true);
+
+      // disable the other viz's so it's easy to see
+      psMesh->setEnabled(false);
+      psCurves->setEnabled(false);
+    }
+  }
 }
 
 void resetTriangulation() {
@@ -170,6 +227,7 @@ void saveMatrix(std::string filename, DenseMatrix<T>& matrix) {
 void outputIntrinsicFaces() {
 
   signpostTri->requireVertexIndices();
+  signpostTri->requireEdgeLengths();
 
   // Assemble Fx3 adjacency matrices vertex indices and edge lengths
   size_t nV = signpostTri->mesh.nVertices();
@@ -189,7 +247,7 @@ void outputIntrinsicFaces() {
       size_t indA = signpostTri->vertexIndices[vA];
       size_t indB = signpostTri->vertexIndices[vB];
       Edge e = he.edge();
-      double l = signpostTri->intrinsicEdgeLengths[e];
+      double l = signpostTri->edgeLengths[e];
 
       faceLengths(iF, v) = l;
       faceInds(iF, v) = indA;
@@ -211,7 +269,10 @@ void outputVertexPositions() {
   size_t nV = signpostTri->mesh.nVertices();
   DenseMatrix<double> vertexPositions(nV, 3);
 
-  VertexData<Vector3> intrinsicPositions = signpostTri->sampleAtInput(geometry->inputVertexPositions);
+  VertexData<Vector3> intrinsicPositions(*signpostTri->intrinsicMesh);
+  for (Vertex v : signpostTri->intrinsicMesh->vertices()) {
+    intrinsicPositions[v] = signpostTri->equivalentPointOnInput(v).interpolate(geometry->vertexPositions);
+  }
 
   size_t iV = 0;
   for (Vertex v : signpostTri->mesh.vertices()) {
@@ -274,6 +335,10 @@ void myCallback() {
     ImGui::Text("  is Delaunay: yes  min angle = %.2f degrees", signpostMinAngleDeg);
   } else {
     ImGui::Text("  is Delaunay: no   min angle = %.2f degrees", signpostMinAngleDeg);
+  }
+
+  if (ImGui::Checkbox("Generate colored triangle viz", &generateColoredTriangleViz)) {
+    updateTriagulationViz();
   }
 
   if (ImGui::Button("reset triangulation")) {
@@ -395,22 +460,6 @@ int main(int argc, char** argv) {
                                             geometry->inputVertexPositions, mesh->getFaceVertexList(),
                                             polyscopePermutations(*mesh));
 
-
-    // Set vertex tangent spaces
-    geometry->requireVertexTangentBasis();
-    VertexData<Vector3> vBasisX(*mesh);
-    for (Vertex v : mesh->vertices()) {
-      vBasisX[v] = geometry->vertexTangentBasis[v][0];
-    }
-    polyscope::getSurfaceMesh()->setVertexTangentBasisX(vBasisX);
-
-    // Set face tangent spaces
-    geometry->requireFaceTangentBasis();
-    FaceData<Vector3> fBasisX(*mesh);
-    for (Face f : mesh->faces()) {
-      fBasisX[f] = geometry->faceTangentBasis[f][0];
-    }
-    polyscope::getSurfaceMesh()->setFaceTangentBasisX(fBasisX);
 
     // Nice defaults
     psMesh->setEdgeWidth(1.0);
